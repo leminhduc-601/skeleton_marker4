@@ -1,5 +1,4 @@
 import numpy as np
-idfhsd;ghsehgpdsrfjgdspnfgds'png
 #Khởi tạo kích thước của 1 ô voxel
 VOXEL_SIZE = 0.05 # 5cm
 
@@ -10,7 +9,6 @@ Z_RANGE = (0, 0.7)
 GRID_X = int((X_RANGE[1] - X_RANGE[0]) / VOXEL_SIZE)
 GRID_Y = int((Y_RANGE[1] - Y_RANGE[0]) / VOXEL_SIZE)
 GRID_Z = int((Z_RANGE[1] - Z_RANGE[0]) / VOXEL_SIZE)
-
 
 class DStarLite:
     def __init__(self, start, goal, k_m):
@@ -100,6 +98,7 @@ class DStarLite:
         x1, y1, z1 = p1
         x2, y2, z2 = p2
         return abs(x2-x1) + abs(y2-y1) + abs(z2-z1) 
+    
     def reconstruct_path(self, s_last):
         path = [s_last]
         s = s_last
@@ -115,7 +114,6 @@ def main():
     planner = DStarLite(start, goal, k_m)
     planner.computeShortestPath()
     print("Giá trị g(start):", planner.g[start])
-
 
 if __name__ == "__main__":
     main()

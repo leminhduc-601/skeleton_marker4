@@ -11,7 +11,6 @@ from tf.transformations import quaternion_about_axis
 
 # Các cặp khớp cần nối
 connection_pairs = [(11,13),(13,15),(11,23),(11,12),(12,24),(23,24),(12,14),(14,16),(24,26),(26,28),(23,25),(25,27)]
-rthrfthfhfgh
 def create_camera_box_marker():
     marker = Marker()
     marker.header.frame_id = "kinect_link"  # chính là khung tọa độ của camera
