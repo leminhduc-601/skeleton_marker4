@@ -5,7 +5,7 @@ VOXEL_SIZE = 0.05 # 5cm
 X_RANGE = (-0.5, 0.5)
 Y_RANGE = (-0.5, 0.5)
 Z_RANGE = (0, 0.7)
-
+hdsfoisdfhsdhfoishdf
 GRID_X = int((X_RANGE[1] - X_RANGE[0]) / VOXEL_SIZE)
 GRID_Y = int((Y_RANGE[1] - Y_RANGE[0]) / VOXEL_SIZE)
 GRID_Z = int((Z_RANGE[1] - Z_RANGE[0]) / VOXEL_SIZE)
