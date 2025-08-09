@@ -1,7 +1,7 @@
 import numpy as np
 #Khởi tạo kích thước của 1 ô voxel
 VOXEL_SIZE = 0.05 # 5cm
-
+    duc0601
 X_RANGE = (-0.5, 0.5)
 Y_RANGE = (-0.5, 0.5)
 Z_RANGE = (0, 0.7)
