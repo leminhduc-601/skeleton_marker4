@@ -1,5 +1,5 @@
 import numpy as np
-idfhsd;ghsehgpdsrfjgdspnfgds'png
+
 #Khởi tạo kích thước của 1 ô voxel
 VOXEL_SIZE = 0.05 # 5cm
 
