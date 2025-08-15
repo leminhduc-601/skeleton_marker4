@@ -55,11 +55,12 @@ def main():
     camera_box = create_camera_box_marker()
     marker_array.markers.append(camera_box)
     pub.publish(marker_array)
+
     try:
         while not rospy.is_shutdown():
             start_time = time.time()
             # 1. Lấy tọa độ skeleton
-            skeleton_coordinates, skeleton_coordinates2 = get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, registration)
+            skeleton_coordinates = get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, registration)
             elapsed_time_ms = (time.time() - start_time) * 1000  # Đổi sang ms
             rospy.loginfo(f"One loop takes {elapsed_time_ms:.2f} ms")
             #2. Hiển thị khung xương như là một vật cản trong môi trường rviz
