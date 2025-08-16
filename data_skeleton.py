@@ -8,7 +8,7 @@ from geometry_msgs.msg import PoseStamped
 from moveit_msgs.msg import CollisionObject
 from shape_msgs.msg import SolidPrimitive
 from tf.transformations import quaternion_about_axis
-
+print( nhanh cua duc)
 # Các cặp khớp cần nối
 connection_pairs = [(11,13),(13,15),(11,23),(11,12),(12,24),(23,24),(12,14),(14,16),(24,26),(26,28),(23,25),(25,27)]
 def create_camera_box_marker():
