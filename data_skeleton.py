@@ -4,11 +4,12 @@ from pylibfreenect2 import Freenect2, Freenect2Device, FrameType, SyncMultiFrame
 import mediapipe as mp
 import rospy
 from visualization_msgs.msg import Marker
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Pose
 from moveit_msgs.msg import CollisionObject
 from shape_msgs.msg import SolidPrimitive
 from tf.transformations import quaternion_about_axis
-2456478576987869689896896896
+from mediapipe.framework.formats import landmark_pb2
+
 # Các cặp khớp cần nối
 connection_pairs = [(11,13),(13,15),(11,23),(11,12),(12,24),(23,24),(12,14),(14,16),(24,26),(26,28),(23,25),(25,27)]
 def create_camera_box_marker():
@@ -45,45 +46,32 @@ def create_camera_box_marker():
 
     return marker
 
-# Danh sách các object đã tạo
-known_objects = set()
+
 collision_pub = rospy.Publisher('/collision_object', CollisionObject, queue_size=10)
 
-
 def add_skeleton_collision_objects(skeleton_coordinates):
-    current_ids = set()  # <<< SỬA TẠI ĐÂY: tạo danh sách ID hiện có lần này
+    # Tạo 1 CollisionObject duy nhất
+    skeleton_obj = CollisionObject()
+    skeleton_obj.id = "human_skeleton"
+    skeleton_obj.header.frame_id = "kinect_link"
+    skeleton_obj.operation = CollisionObject.ADD  # Luôn ADD để overwrite
 
-    # --- Hiển thị các khớp ---
+    # --- Thêm khớp (hình cầu) ---
     for idx, (x, y, z) in skeleton_coordinates.items():
-        obj_id = f"joint_{idx}"
-        current_ids.add(obj_id)  # <<< SỬA TẠI ĐÂY
-
         primitive = SolidPrimitive()
         primitive.type = SolidPrimitive.SPHERE
         primitive.dimensions = [0.05]  # bán kính 5cm
 
-        pose = PoseStamped()
-        pose.header.frame_id = "kinect_link"
-        pose.pose.position.x = x
-        pose.pose.position.y = y
-        pose.pose.position.z = z
-        pose.pose.orientation.w = 1.0
+        pose = Pose()
+        pose.position.x = x
+        pose.position.y = y
+        pose.position.z = z
+        pose.orientation.w = 1.0
 
-        obj = CollisionObject()
-        obj.id = obj_id
-        obj.header.frame_id = "kinect_link"
-        obj.primitives.append(primitive)
-        obj.primitive_poses.append(pose.pose)
+        skeleton_obj.primitives.append(primitive)
+        skeleton_obj.primitive_poses.append(pose)
 
-        if obj_id not in known_objects:
-            obj.operation = CollisionObject.ADD
-            known_objects.add(obj_id)
-        else:
-            obj.operation = CollisionObject.MOVE
-
-        collision_pub.publish(obj)
-
-    # --- Hiển thị các xương ---
+    # --- Thêm xương (hình trụ) ---
     for idx1, idx2 in connection_pairs:
         if idx1 in skeleton_coordinates and idx2 in skeleton_coordinates:
             p1 = np.array(skeleton_coordinates[idx1])
@@ -101,48 +89,25 @@ def add_skeleton_collision_objects(skeleton_coordinates):
             else:
                 quat = quaternion_about_axis(angle, axis / np.linalg.norm(axis))
 
-            obj_id = f"bone_{idx1}_{idx2}"
-            current_ids.add(obj_id)  # <<< SỬA TẠI ĐÂY
-
             primitive = SolidPrimitive()
             primitive.type = SolidPrimitive.CYLINDER
             primitive.dimensions = [height, 0.04]  # height, radius
 
-            pose = PoseStamped()
-            pose.header.frame_id = "kinect_link"
-            pose.pose.position.x = center[0]
-            pose.pose.position.y = center[1]
-            pose.pose.position.z = center[2]
-            pose.pose.orientation.x = quat[0]
-            pose.pose.orientation.y = quat[1]
-            pose.pose.orientation.z = quat[2]
-            pose.pose.orientation.w = quat[3]
+            pose = Pose()
+            pose.position.x = center[0]
+            pose.position.y = center[1]
+            pose.position.z = center[2]
+            pose.orientation.x = quat[0]
+            pose.orientation.y = quat[1]
+            pose.orientation.z = quat[2]
+            pose.orientation.w = quat[3]
 
-            obj = CollisionObject()
-            obj.id = obj_id
-            obj.header.frame_id = "kinect_link"
-            obj.primitives.append(primitive)
-            obj.primitive_poses.append(pose.pose)
+            skeleton_obj.primitives.append(primitive)
+            skeleton_obj.primitive_poses.append(pose)
 
-            if obj_id not in known_objects:
-                obj.operation = CollisionObject.ADD
-                known_objects.add(obj_id)
-            else:
-                obj.operation = CollisionObject.MOVE
+    # --- Publish tất cả 1 lần ---
+    collision_pub.publish(skeleton_obj)
 
-            collision_pub.publish(obj)
-
-    # --- Xóa các object không còn trong frame hiện tại ---
-    to_remove = known_objects - current_ids  # <<< SỬA TẠI ĐÂY
-
-    for obj_id in to_remove:
-        obj = CollisionObject()
-        obj.id = obj_id
-        obj.header.frame_id = "kinect_link"
-        obj.operation = CollisionObject.REMOVE
-        collision_pub.publish(obj)
-
-    known_objects.intersection_update(current_ids)  # <<< SỬA TẠI ĐÂY: cập nhật lại danh sách
 
 def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registration):
     # Đợi và lấy frame mới
@@ -166,48 +131,35 @@ def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registra
     required_landmarks = [0, 11, 13, 15, 12, 14, 16, 23, 24, 25, 26, 27, 28]
     # Vẽ khung xương nếu tìm thấy
     if results.pose_landmarks:
-        for idx in required_landmarks:
-            landmark = results.pose_landmarks.landmark[idx]
-            x_px = int(landmark.x * registered.width)
-            y_px = int(landmark.y * registered.height)
-            visibility = landmark.visibility
-            if visibility > 0.90:
+        # Tạo bản sao đã lọc theo visibility
+        filtered_landmarks = landmark_pb2.NormalizedLandmarkList()
+        for idx, lm in enumerate(results.pose_landmarks.landmark):
+            if lm.visibility > 0.8  and idx in required_landmarks:
+                x_px = int(lm.x * registered.width)
+                y_px = int(lm.y * registered.height)
                 point_3d = registration.getPointXYZ(undistorted, y_px, x_px)
                 x, y, z = point_3d
                 if not any(np.isnan([x, y, z])):
-                    print(f"Landmark {idx}: (x={x}, y={y}, z={z:.4f}, visibility={visibility})")
                     skeleton_coordinates[idx] = (x, z, -y)
-            mp_drawing.draw_landmarks(
-                registered_image_bgr,
-                results.pose_landmarks,
-                mp.solutions.pose.POSE_CONNECTIONS,
-                landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
-                connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
-            )
+                filtered_landmarks.landmark.append(lm)
+            else:
+                # Đẩy điểm ra ngoài khung hình để không vẽ
+                fake = landmark_pb2.NormalizedLandmark(x=-1.0, y=-1.0, z=0.0, visibility=0.0)
+                filtered_landmarks.landmark.append(fake)
 
-    # if 23 in skeleton_coordinates and 24 in skeleton_coordinates:
-    #     hip_left = np.array(skeleton_coordinates[23])
-    #     hip_right = np.array(skeleton_coordinates[24])
-    #     hip_center = (hip_left + hip_right) / 2.0
-    #     x1, y1, z1 = hip_center
-    # else:
-    #     hip_center = None  # Hoặc xử lý fallback sau
-    # #print(f"hip_center: {hip_center}")
-    # if results.pose_world_landmarks:
-    #     for idx, landmark2 in enumerate(results.pose_world_landmarks.landmark):
-    #         if idx in required_landmarks:
-    #             x, y, z = landmark2.x, landmark2.y, landmark2.z
-    #             visibility = landmark2.visibility
-    #             if visibility > 0.6 and hip_center is not None:
-    #                 skeleton_coordinates2[idx] = (-x - x1, z + y1, -y + z1) 
-    #                 # print(f"Landmark {idx}: (x={x}, y={y}, z={z:.4f}, visibility={visibility})")
-
-    # # Hiển thị
+        # Vẽ chỉ những điểm đủ điều kiện
+        mp_drawing.draw_landmarks(
+            registered_image_bgr,
+            filtered_landmarks,
+            mp.solutions.pose.POSE_CONNECTIONS,
+            landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
+            connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
+        )
     ros_image = bridge.cv2_to_imgmsg(registered_image_bgr, encoding="bgr8")
     image_pub.publish(ros_image)
     
     listener.release(frames)
-    return skeleton_coordinates, skeleton_coordinates2 
+    return skeleton_coordinates
 
 
 def initialize_camera():
@@ -238,6 +190,24 @@ def initialize_camera():
 
 
 
+    # if 23 in skeleton_coordinates and 24 in skeleton_coordinates:
+    #     hip_left = np.array(skeleton_coordinates[23])
+    #     hip_right = np.array(skeleton_coordinates[24])
+    #     hip_center = (hip_left + hip_right) / 2.0
+    #     x1, y1, z1 = hip_center
+    # else:
+    #     hip_center = None  # Hoặc xử lý fallback sau
+    # #print(f"hip_center: {hip_center}")
+    # if results.pose_world_landmarks:
+    #     for idx, landmark2 in enumerate(results.pose_world_landmarks.landmark):
+    #         if idx in required_landmarks:
+    #             x, y, z = landmark2.x, landmark2.y, landmark2.z
+    #             visibility = landmark2.visibility
+    #             if visibility > 0.6 and hip_center is not None:
+    #                 skeleton_coordinates2[idx] = (-x - x1, z + y1, -y + z1) 
+    #                 # print(f"Landmark {idx}: (x={x}, y={y}, z={z:.4f}, visibility={visibility})")
+
+    # # Hiển thị
 
 
 
