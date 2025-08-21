@@ -10,6 +10,115 @@ from shape_msgs.msg import SolidPrimitive
 from tf.transformations import quaternion_about_axis
 from mediapipe.framework.formats import landmark_pb2
 
+class KalmanCV3D:
+    """
+    Kalman 3D với mô hình vận tốc hằng.
+    Trạng thái: [x y z vx vy vz]^T
+    - Gating (Mahalanobis) chống outlier mạnh
+    - Lookahead giảm trễ cảm nhận
+    """
+    def __init__(self, process_var=1e-2, meas_var=5e-3,
+                 gating_thresh=9.0, lookahead=0.033):
+        self.x = None          # state 6x1
+        self.P = None          # covariance 6x6
+        self.q = process_var   # process noise power
+        self.r = meas_var      # measurement noise
+        self.last_t = None
+        self.gating_thresh = gating_thresh
+        self.lookahead = lookahead
+
+    def _F_Q(self, dt: float):
+        F = np.eye(6)
+        F[0,3] = F[1,4] = F[2,5] = dt
+        # Q ~ G q G^T (white accel model “nghèo” nhưng hiệu quả)
+        G = np.array([[0.5*dt*dt],[0.5*dt*dt],[0.5*dt*dt],[dt],[dt],[dt]])
+        Q = self.q * (G @ G.T)
+        return F, Q
+
+    def predict(self, dt: float):
+        F, Q = self._F_Q(dt)
+        self.x = F @ self.x
+        self.P = F @ self.P @ F.T + Q
+
+    def _out_with_lookahead(self):
+        x, y, z, vx, vy, vz = self.x.flatten()
+        return (float(x + vx*self.lookahead),
+                float(y + vy*self.lookahead),
+                float(z + vz*self.lookahead))
+
+    def update(self, z, timestamp=None):
+        now = time.time() if timestamp is None else float(timestamp)
+
+        if self.last_t is None:
+            # init
+            self.last_t = now
+            self.x = np.zeros((6,1))
+            self.x[0,0], self.x[1,0], self.x[2,0] = z
+            self.P = np.eye(6) * 1e-2
+            return tuple(z)
+
+        dt = max(1e-6, now - self.last_t)
+        self.last_t = now
+
+        # predict
+        self.predict(dt)
+
+        # measurement model
+        H = np.zeros((3,6)); H[0,0]=H[1,1]=H[2,2]=1.0
+        R = np.eye(3) * self.r
+        z = np.array(z, dtype=float).reshape(3,1)
+
+        # innovation + gating (Mahalanobis)
+        y = z - H @ self.x
+        S = H @ self.P @ H.T + R
+        try:
+            Sinv = np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            # phòng hờ trường hợp S suy biến
+            Sinv = np.linalg.pinv(S)
+        d2 = float(y.T @ Sinv @ y)  # ~ χ²(df=3)
+
+        if d2 <= self.gating_thresh:
+            # update bình thường
+            K = self.P @ H.T @ Sinv
+            self.x = self.x + K @ y
+            I = np.eye(6)
+            self.P = (I - K @ H) @ self.P
+        # else: bỏ đo → giữ nguyên dự đoán
+
+        return self._out_with_lookahead()
+
+# ---- cấu hình bộ lọc & tiện ích dùng lại giữa các frame ----
+FILTER_MODE = "kalman"   # đổi "off" nếu muốn tắt nhanh
+KALMAN_PARAMS = dict(process_var=1e-2, meas_var=5e-3,
+                     gating_thresh=9.0, lookahead=0.033)
+
+_joint_kalman = {}   # lưu một bộ lọc cho mỗi joint-id
+
+# (tùy chọn) kẹp bước nhảy để “chặn” spike còn sót
+_MAX_STEP = 0.5      # mét / frame; chỉnh 0.3–0.7 tùy đơn vị của bạn
+_last_pos = {}
+
+def _clamp_step(jid, p):
+    lp = _last_pos.get(jid)
+    if lp is None:
+        _last_pos[jid] = p
+        return p
+    v = np.array(p) - np.array(lp)
+    n = float(np.linalg.norm(v))
+    if n > _MAX_STEP and n > 1e-9:
+        p = tuple((np.array(lp) + v * (_MAX_STEP/n)).tolist())
+    _last_pos[jid] = p
+    return p
+
+def _get_kalman(jid):
+    f = _joint_kalman.get(jid)
+    if f is None:
+        f = KalmanCV3D(**KALMAN_PARAMS)
+        _joint_kalman[jid] = f
+    return f
+# ====== HẾT PHẦN KALMAN ======
+
 # Các cặp khớp cần nối
 connection_pairs = [(11,13),(13,15),(11,23),(11,12),(12,24),(23,24),(12,14),(14,16),(24,26),(26,28),(23,25),(25,27)]
 def create_camera_box_marker():
@@ -159,6 +268,20 @@ def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registra
     image_pub.publish(ros_image)
     
     listener.release(frames)
+        # === Áp dụng Kalman + Clamp Step cho từng joint ===
+    if FILTER_MODE == "kalman" and isinstance(skeleton_coordinates, dict):
+        filtered = {}
+        now_ts = None   # có thể thay bằng rospy.get_time() nếu dùng ROS
+        for jid, p in skeleton_coordinates.items():
+            # Bảo hiểm: chặn bước nhảy phi lý trước khi đưa vào Kalman
+            p = _clamp_step(jid, p)
+
+            # Lấy Kalman filter cho khớp này
+            kf = _get_kalman(jid)
+            filtered[jid] = kf.update(p, timestamp=now_ts)
+
+        skeleton_coordinates = filtered
+
     return skeleton_coordinates
 
 
