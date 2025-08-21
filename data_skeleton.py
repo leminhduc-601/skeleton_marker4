@@ -10,114 +10,141 @@ from shape_msgs.msg import SolidPrimitive
 from tf.transformations import quaternion_about_axis
 from mediapipe.framework.formats import landmark_pb2
 
-class KalmanCV3D:
+# ====== SIMPLE ARM FILTERS: outlier + median + bone-length lock ======
+from collections import defaultdict, deque
+import numpy as np
+
+# ---- Tham số chỉnh được ----
+WINDOW = 5           # cửa sổ median (5 là hợp lý: mượt nhẹ, trễ ~2 frame)
+MAX_JUMP = 0.5       # bước nhảy tối đa chấp nhận giữa 2 frame (đơn vị VỊ TRÍ của bạn: m hoặc mm)
+CALIB_FRAMES = 50    # số frame để hiệu chuẩn độ dài xương tay
+# ----------------------------
+
+# Lịch sử dữ liệu từng khớp (để tính median theo trục)
+_joint_hist = defaultdict(lambda: deque(maxlen=WINDOW))
+
+# Bộ đếm frame & trạng thái hiệu chuẩn xương tay
+_frame_count = 0
+_calibrated = False
+
+# Danh sách xương tay cần cố định
+ARM_BONES = [
+    (12, 14),  # vai trái - khuỷu trái
+    (14, 16),  # khuỷu trái - cổ tay trái
+    (11, 13),  # vai phải - khuỷu phải
+    (13, 15),  # khuỷu phải - cổ tay phải
+]
+
+# Lưu mẫu độ dài trong giai đoạn hiệu chuẩn & độ dài chuẩn sau khi chốt
+_bone_samples = defaultdict(lambda: deque(maxlen=CALIB_FRAMES))
+_bone_length = {}  # {(a,b): L}
+
+def _dist(a, b):
+    return float(np.linalg.norm(np.array(a) - np.array(b)))
+
+def _median3(hist):
+    xs = sorted(h[0] for h in hist)
+    ys = sorted(h[1] for h in hist)
+    zs = sorted(h[2] for h in hist)
+    m = len(hist) // 2
+    return (xs[m], ys[m], zs[m])
+
+def _filter_one_joint(jid, p):
     """
-    Kalman 3D với mô hình vận tốc hằng.
-    Trạng thái: [x y z vx vy vz]^T
-    - Gating (Mahalanobis) chống outlier mạnh
-    - Lookahead giảm trễ cảm nhận
+    Bước 1: loại outlier mạnh so với frame trước (MAX_JUMP)
+    Bước 2: thêm vào lịch sử & trả về median theo trục
     """
-    def __init__(self, process_var=1e-2, meas_var=5e-3,
-                 gating_thresh=9.0, lookahead=0.033):
-        self.x = None          # state 6x1
-        self.P = None          # covariance 6x6
-        self.q = process_var   # process noise power
-        self.r = meas_var      # measurement noise
-        self.last_t = None
-        self.gating_thresh = gating_thresh
-        self.lookahead = lookahead
+    hist = _joint_hist[jid]
+    if hist:
+        prev = hist[-1]
+        if _dist(p, prev) > MAX_JUMP:
+            # outlier → bỏ frame này, dùng lại giá trị trước
+            return prev
 
-    def _F_Q(self, dt: float):
-        F = np.eye(6)
-        F[0,3] = F[1,4] = F[2,5] = dt
-        # Q ~ G q G^T (white accel model “nghèo” nhưng hiệu quả)
-        G = np.array([[0.5*dt*dt],[0.5*dt*dt],[0.5*dt*dt],[dt],[dt],[dt]])
-        Q = self.q * (G @ G.T)
-        return F, Q
+    # ok → nhận frame này, thêm vào lịch sử
+    hist.append(p)
+    return _median3(hist)
 
-    def predict(self, dt: float):
-        F, Q = self._F_Q(dt)
-        self.x = F @ self.x
-        self.P = F @ self.P @ F.T + Q
+def _calibrate_arm_lengths(skel):
+    """
+    Thu thập độ dài xương tay trong CALIB_FRAMES frame đầu.
+    Dùng median để chốt độ dài chuẩn.
+    """
+    global _frame_count, _calibrated
 
-    def _out_with_lookahead(self):
-        x, y, z, vx, vy, vz = self.x.flatten()
-        return (float(x + vx*self.lookahead),
-                float(y + vy*self.lookahead),
-                float(z + vz*self.lookahead))
+    if _calibrated:
+        return
 
-    def update(self, z, timestamp=None):
-        now = time.time() if timestamp is None else float(timestamp)
+    # thu mẫu nếu đủ cặp khớp
+    for a, b in ARM_BONES:
+        if a in skel and b in skel:
+            d = _dist(skel[a], skel[b])
+            # chỉ nhận mẫu "hợp lý" (không phải spike quá lớn)
+            if d > 1e-6:  # tránh trùng điểm
+                _bone_samples[(a, b)].append(d)
 
-        if self.last_t is None:
-            # init
-            self.last_t = now
-            self.x = np.zeros((6,1))
-            self.x[0,0], self.x[1,0], self.x[2,0] = z
-            self.P = np.eye(6) * 1e-2
-            return tuple(z)
+    _frame_count += 1
+    if _frame_count >= CALIB_FRAMES:
+        # chốt độ dài bằng median các mẫu đã thu
+        for k, samples in _bone_samples.items():
+            if samples:
+                srt = sorted(samples)
+                _bone_length[k] = srt[len(srt)//2]  # median
+        _calibrated = True
+        # print("[INFO] Bone-length calibration locked:", _bone_length)
 
-        dt = max(1e-6, now - self.last_t)
-        self.last_t = now
+def _fix_bone_lengths(skel):
+    """
+    Chuẩn hóa lại độ dài xương tay về đúng chiều dài đã hiệu chuẩn.
+    Chỉnh bằng cách giữ nguyên trung điểm cặp khớp và kéo 2 đầu về đúng L/2.
+    """
+    if not _bone_length:
+        return skel
 
-        # predict
-        self.predict(dt)
+    fixed = dict(skel)
+    for (a, b), L in _bone_length.items():
+        if a in fixed and b in fixed:
+            pa = np.array(fixed[a], dtype=float)
+            pb = np.array(fixed[b], dtype=float)
+            v = pb - pa
+            n = np.linalg.norm(v)
+            if n < 1e-6 or L <= 0:
+                continue
+            mid = (pa + pb) / 2.0
+            vu = v / n
+            pa_new = mid - vu * (L / 2.0)
+            pb_new = mid + vu * (L / 2.0)
+            fixed[a] = (float(pa_new[0]), float(pa_new[1]), float(pa_new[2]))
+            fixed[b] = (float(pb_new[0]), float(pb_new[1]), float(pb_new[2]))
+    return fixed
 
-        # measurement model
-        H = np.zeros((3,6)); H[0,0]=H[1,1]=H[2,2]=1.0
-        R = np.eye(3) * self.r
-        z = np.array(z, dtype=float).reshape(3,1)
+def arm_filter_pipeline(skeleton_coordinates):
+    """
+    Pipeline gọn để gọi trước khi return:
+      Raw → (outlier check) → (median) → (lock bone length sau calib)
+    """
+    global _calibrated
 
-        # innovation + gating (Mahalanobis)
-        y = z - H @ self.x
-        S = H @ self.P @ H.T + R
-        try:
-            Sinv = np.linalg.inv(S)
-        except np.linalg.LinAlgError:
-            # phòng hờ trường hợp S suy biến
-            Sinv = np.linalg.pinv(S)
-        d2 = float(y.T @ Sinv @ y)  # ~ χ²(df=3)
+    if not isinstance(skeleton_coordinates, dict):
+        return skeleton_coordinates
 
-        if d2 <= self.gating_thresh:
-            # update bình thường
-            K = self.P @ H.T @ Sinv
-            self.x = self.x + K @ y
-            I = np.eye(6)
-            self.P = (I - K @ H) @ self.P
-        # else: bỏ đo → giữ nguyên dự đoán
+    # 1) Lọc theo joint: outlier → bỏ, median smoothing
+    filtered = {}
+    for jid, p in skeleton_coordinates.items():
+        filtered[jid] = _filter_one_joint(jid, p)
 
-        return self._out_with_lookahead()
+    # 2) Hiệu chuẩn độ dài xương tay (trong 50 frame đầu)
+    if not _calibrated:
+        _calibrate_arm_lengths(filtered)
 
-# ---- cấu hình bộ lọc & tiện ích dùng lại giữa các frame ----
-FILTER_MODE = "kalman"   # đổi "off" nếu muốn tắt nhanh
-KALMAN_PARAMS = dict(process_var=1e-2, meas_var=5e-3,
-                     gating_thresh=9.0, lookahead=0.033)
+    # 3) Nếu đã chốt chiều dài xương → sửa lại cho khớp tay
+    if _calibrated:
+        filtered = _fix_bone_lengths(filtered)
 
-_joint_kalman = {}   # lưu một bộ lọc cho mỗi joint-id
+    return filtered
+# ====== END SIMPLE ARM FILTERS ======
 
-# (tùy chọn) kẹp bước nhảy để “chặn” spike còn sót
-_MAX_STEP = 0.5      # mét / frame; chỉnh 0.3–0.7 tùy đơn vị của bạn
-_last_pos = {}
 
-def _clamp_step(jid, p):
-    lp = _last_pos.get(jid)
-    if lp is None:
-        _last_pos[jid] = p
-        return p
-    v = np.array(p) - np.array(lp)
-    n = float(np.linalg.norm(v))
-    if n > _MAX_STEP and n > 1e-9:
-        p = tuple((np.array(lp) + v * (_MAX_STEP/n)).tolist())
-    _last_pos[jid] = p
-    return p
-
-def _get_kalman(jid):
-    f = _joint_kalman.get(jid)
-    if f is None:
-        f = KalmanCV3D(**KALMAN_PARAMS)
-        _joint_kalman[jid] = f
-    return f
-# ====== HẾT PHẦN KALMAN ======
 
 # Các cặp khớp cần nối
 connection_pairs = [(11,13),(13,15),(11,23),(11,12),(12,24),(23,24),(12,14),(14,16),(24,26),(26,28),(23,25),(25,27)]
@@ -276,20 +303,7 @@ def get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, regi
     image_pub.publish(ros_image)
     
     listener.release(frames)
-        # === Áp dụng Kalman + Clamp Step cho từng joint ===
-    if FILTER_MODE == "kalman" and isinstance(skeleton_coordinates, dict):
-        filtered = {}
-        now_ts = None   # có thể thay bằng rospy.get_time() nếu dùng ROS
-        for jid, p in skeleton_coordinates.items():
-            # Bảo hiểm: chặn bước nhảy phi lý trước khi đưa vào Kalman
-            p = _clamp_step(jid, p)
-
-            # Lấy Kalman filter cho khớp này
-            kf = _get_kalman(jid)
-            filtered[jid] = kf.update(p, timestamp=now_ts)
-
-        skeleton_coordinates = filtered
-
+    skeleton_coordinates = arm_filter_pipeline(skeleton_coordinates)
     return skeleton_coordinates
 
 
