@@ -69,29 +69,34 @@ def _calibrate_arm_lengths(skel):
     """
     Thu thập độ dài xương tay trong CALIB_FRAMES frame đầu.
     Dùng median để chốt độ dài chuẩn.
+    Chỉ bắt đầu đếm frame khi có đủ khớp tay trong skeleton.
     """
     global _frame_count, _calibrated
 
     if _calibrated:
         return
 
-    # thu mẫu nếu đủ cặp khớp
+    # 1. Kiểm tra có đủ khớp của xương tay chưa
+    valid = all(a in skel and b in skel for a, b in ARM_BONES)
+    if not valid:
+        return  # chưa đủ → bỏ qua frame này
+
+    # 2. Nếu đủ → thu mẫu độ dài xương tay (chỉ nhận mẫu hợp lý)
     for a, b in ARM_BONES:
-        if a in skel and b in skel:
-            d = _dist(skel[a], skel[b])
-            # chỉ nhận mẫu "hợp lý" (không phải spike quá lớn)
-            if d > 1e-6:  # tránh trùng điểm
-                _bone_samples[(a, b)].append(d)
+        d = _dist(skel[a], skel[b])
+        if 0.1 < d < 1.0:  # khoảng hợp lý với người
+            _bone_samples[(a, b)].append(d)
 
     _frame_count += 1
+
+    # 3. Khi đủ số frame → chốt median
     if _frame_count >= CALIB_FRAMES:
-        # chốt độ dài bằng median các mẫu đã thu
         for k, samples in _bone_samples.items():
             if samples:
                 srt = sorted(samples)
-                _bone_length[k] = srt[len(srt)//2]  # median
+                _bone_length[k] = srt[len(srt)//2]
         _calibrated = True
-        # print("[INFO] Bone-length calibration locked:", _bone_length)
+        print("[INFO] ✅ Bone calibration locked — used", _frame_count, "frames")
 
 def _fix_bone_lengths(skel):
     """
