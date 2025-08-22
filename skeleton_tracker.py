@@ -14,7 +14,7 @@ from tf.transformations import quaternion_from_euler
 
 
 translation = (1.1, 0, 1.5)
-rotation_rpy = (-0.60, 0, 1.5708)
+rotation_rpy = (-0.82, 0, 1.5708)
 
 def publish_static_transform(translation, rotation_rpy):
     broadcaster = tf2_ros.StaticTransformBroadcaster()
@@ -58,11 +58,9 @@ def main():
 
     try:
         while not rospy.is_shutdown():
-            start_time = time.time()
             # 1. Lấy tọa độ skeleton
             skeleton_coordinates = get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, registration)
-            elapsed_time_ms = (time.time() - start_time) * 1000  # Đổi sang ms
-            rospy.loginfo(f"One loop takes {elapsed_time_ms:.2f} ms")
+            print(skeleton_coordinates)
             #2. Hiển thị khung xương như là một vật cản trong môi trường rviz
             add_skeleton_collision_objects(skeleton_coordinates)
             rate.sleep()

@@ -108,8 +108,7 @@ def add_skeleton_collision_objects(skeleton_coordinates):
     # --- Publish tất cả 1 lần ---
     collision_pub.publish(skeleton_obj)
 
-
-def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registration):
+def get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, registration):
     # Đợi và lấy frame mới
     frames = listener.waitForNewFrame()
 
@@ -123,18 +122,15 @@ def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registra
     registered_image = registered.asarray(dtype=np.uint8)
     registered_image_bgr = cv2.cvtColor(registered_image, cv2.COLOR_RGB2BGR)
 
-    # === THÊM: Nhận diện khung xương bằng Mediapipe Pose ===
-    # Chuyển ảnh sang RGB để dùng với Mediapipe
+    # === Nhận diện khung xương bằng Mediapipe Pose ===
     results = pose.process(registered_image_bgr)
     skeleton_coordinates = {}
-    skeleton_coordinates2 = {}
     required_landmarks = [0, 11, 13, 15, 12, 14, 16, 23, 24, 25, 26, 27, 28]
-    # Vẽ khung xương nếu tìm thấy
+
     if results.pose_landmarks:
-        # Tạo bản sao đã lọc theo visibility
         filtered_landmarks = landmark_pb2.NormalizedLandmarkList()
         for idx, lm in enumerate(results.pose_landmarks.landmark):
-            if lm.visibility > 0.8  and idx in required_landmarks:
+            if lm.visibility > 0.9 and idx in required_landmarks:
                 x_px = int(lm.x * registered.width)
                 y_px = int(lm.y * registered.height)
                 point_3d = registration.getPointXYZ(undistorted, y_px, x_px)
@@ -143,7 +139,6 @@ def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registra
                     skeleton_coordinates[idx] = (x, z, -y)
                 filtered_landmarks.landmark.append(lm)
             else:
-                # Đẩy điểm ra ngoài khung hình để không vẽ
                 fake = landmark_pb2.NormalizedLandmark(x=-1.0, y=-1.0, z=0.0, visibility=0.0)
                 filtered_landmarks.landmark.append(fake)
 
@@ -155,11 +150,75 @@ def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registra
             landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
             connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
         )
+
+    # === CHỈNH SỬA: ép y của 23 = y của 11, và y của 24 = y của 12 ===
+    if 23 in skeleton_coordinates and 11 in skeleton_coordinates:
+        x23, y23, z23 = skeleton_coordinates[23]
+        _, y11, _ = skeleton_coordinates[11]
+        skeleton_coordinates[23] = (x23, y11+ 0.3, z23)
+
+    if 24 in skeleton_coordinates and 12 in skeleton_coordinates:
+        x24, y24, z24 = skeleton_coordinates[24]
+        _, y12, _ = skeleton_coordinates[12]
+        skeleton_coordinates[24] = (x24, y12 + 0.3, z24)
+
+    # Xuất ảnh ROS
     ros_image = bridge.cv2_to_imgmsg(registered_image_bgr, encoding="bgr8")
     image_pub.publish(ros_image)
     
     listener.release(frames)
     return skeleton_coordinates
+
+
+# def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registration):
+#     # Đợi và lấy frame mới
+#     frames = listener.waitForNewFrame()
+
+#     color_frame = frames[FrameType.Color]
+#     depth_frame = frames[FrameType.Depth]
+#     # Tạo khung chứa kết quả đăng ký
+#     undistorted = Frame(512, 424, 4)
+#     registered = Frame(512, 424, 4)
+#     # Đăng ký ảnh: căn chỉnh ảnh màu với ảnh depth
+#     registration.apply(color_frame, depth_frame, undistorted, registered)
+#     registered_image = registered.asarray(dtype=np.uint8)
+#     registered_image_bgr = cv2.cvtColor(registered_image, cv2.COLOR_RGB2BGR)
+
+#     # === THÊM: Nhận diện khung xương bằng Mediapipe Pose ===
+#     # Chuyển ảnh sang RGB để dùng với Mediapipe
+#     results = pose.process(registered_image_bgr)
+#     skeleton_coordinates = {}
+#     required_landmarks = [0, 11, 13, 15, 12, 14, 16, 23, 24, 25, 26, 27, 28]
+#     # Vẽ khung xương nếu tìm thấy
+#     if results.pose_landmarks:
+#         # Tạo bản sao đã lọc theo visibility
+#         filtered_landmarks = landmark_pb2.NormalizedLandmarkList()
+#         for idx, lm in enumerate(results.pose_landmarks.landmark):
+#             if lm.visibility > 0.8  and idx in required_landmarks:
+#                 x_px = int(lm.x * registered.width)
+#                 y_px = int(lm.y * registered.height)
+#                 point_3d = registration.getPointXYZ(undistorted, y_px, x_px)
+#                 x, y, z = point_3d
+#                 if not any(np.isnan([x, y, z])):
+#                     skeleton_coordinates[idx] = (x, z, -y)
+#                 filtered_landmarks.landmark.append(lm)
+#             else:
+#                 # Đẩy điểm ra ngoài khung hình để không vẽ
+#                 fake = landmark_pb2.NormalizedLandmark(x=-1.0, y=-1.0, z=0.0, visibility=0.0)
+#                 filtered_landmarks.landmark.append(fake)
+#         # Vẽ chỉ những điểm đủ điều kiện
+#         mp_drawing.draw_landmarks(
+#             registered_image_bgr,
+#             filtered_landmarks,
+#             mp.solutions.pose.POSE_CONNECTIONS,
+#             landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
+#             connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
+#         )
+#     ros_image = bridge.cv2_to_imgmsg(registered_image_bgr, encoding="bgr8")
+#     image_pub.publish(ros_image)
+    
+#     listener.release(frames)
+#     return skeleton_coordinates
 
 
 def initialize_camera():

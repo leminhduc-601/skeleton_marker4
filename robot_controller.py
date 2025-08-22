@@ -164,12 +164,8 @@ def move_between_voxels(move_group, path):
         if k_m < len(path):
             voxel_blocked = path[k_m]
 
-    rospy.loginfo(f"✓ Robot đã đi tới voxel: {voxel_reached} (k_m={k_m})")
     if voxel_blocked:
-        rospy.logwarn(f"✘ Robot bị chặn tại voxel tiếp theo: {voxel_blocked}")
-    else:
-        rospy.loginfo("✓ Robot đã đi hết toàn bộ path.")
-
+        rospy.logwarn("Phát hiện va chạm với con người")
     return voxel_reached, voxel_blocked, k_m
 
 
@@ -334,22 +330,6 @@ def main():
                     planner.barriers.add(start)
                     planner.updateVertex(start, s_last, k_m)
                     planner.computeShortestPath(s_last, k_m)
-            
-                    
-            #         success = move_between_voxels(move_group, s_last, start)
-            #         if not success:
-            #             planner.barriers.add(start)
-            #             planner.updateVertex(start, s_last, k_m) 
-            #             start = s_last
-            #         k_m += planner.h(s_last, start)
-            #         print(k_m)
-            #         planner.computeShortestPath(s_last, k_m)
-            #         s_last = start
-            #     publish_voxels(marker_pub, start_voxel, goal_voxel, visited_path, planner.barriers)
-            # rospy.loginfo("Đã di chuyển xong")
-            # break
-            
-            
     except KeyboardInterrupt:
         print("Shutting down due to Ctrl+C...")
     
