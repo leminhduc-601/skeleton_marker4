@@ -293,57 +293,6 @@ def get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, regi
     return skeleton_coordinates
 
 
-# def get_skeleton_coordinates(listener,pose,mp_drawing,image_pub, bridge,registration):
-#     # Đợi và lấy frame mới
-#     frames = listener.waitForNewFrame()
-
-#     color_frame = frames[FrameType.Color]
-#     depth_frame = frames[FrameType.Depth]
-#     # Tạo khung chứa kết quả đăng ký
-#     undistorted = Frame(512, 424, 4)
-#     registered = Frame(512, 424, 4)
-#     # Đăng ký ảnh: căn chỉnh ảnh màu với ảnh depth
-#     registration.apply(color_frame, depth_frame, undistorted, registered)
-#     registered_image = registered.asarray(dtype=np.uint8)
-#     registered_image_bgr = cv2.cvtColor(registered_image, cv2.COLOR_RGB2BGR)
-
-#     # === THÊM: Nhận diện khung xương bằng Mediapipe Pose ===
-#     # Chuyển ảnh sang RGB để dùng với Mediapipe
-#     results = pose.process(registered_image_bgr)
-#     skeleton_coordinates = {}
-#     required_landmarks = [0, 11, 13, 15, 12, 14, 16, 23, 24, 25, 26, 27, 28]
-#     # Vẽ khung xương nếu tìm thấy
-#     if results.pose_landmarks:
-#         # Tạo bản sao đã lọc theo visibility
-#         filtered_landmarks = landmark_pb2.NormalizedLandmarkList()
-#         for idx, lm in enumerate(results.pose_landmarks.landmark):
-#             if lm.visibility > 0.8  and idx in required_landmarks:
-#                 x_px = int(lm.x * registered.width)
-#                 y_px = int(lm.y * registered.height)
-#                 point_3d = registration.getPointXYZ(undistorted, y_px, x_px)
-#                 x, y, z = point_3d
-#                 if not any(np.isnan([x, y, z])):
-#                     skeleton_coordinates[idx] = (x, z, -y)
-#                 filtered_landmarks.landmark.append(lm)
-#             else:
-#                 # Đẩy điểm ra ngoài khung hình để không vẽ
-#                 fake = landmark_pb2.NormalizedLandmark(x=-1.0, y=-1.0, z=0.0, visibility=0.0)
-#                 filtered_landmarks.landmark.append(fake)
-#         # Vẽ chỉ những điểm đủ điều kiện
-#         mp_drawing.draw_landmarks(
-#             registered_image_bgr,
-#             filtered_landmarks,
-#             mp.solutions.pose.POSE_CONNECTIONS,
-#             landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
-#             connection_drawing_spec=mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
-#         )
-#     ros_image = bridge.cv2_to_imgmsg(registered_image_bgr, encoding="bgr8")
-#     image_pub.publish(ros_image)
-    
-#     listener.release(frames)
-#     return skeleton_coordinates
-
-
 def initialize_camera():
     fn = Freenect2()
     num_devices = fn.enumerateDevices()
@@ -371,25 +320,6 @@ def initialize_camera():
 
 
 
-
-    # if 23 in skeleton_coordinates and 24 in skeleton_coordinates:
-    #     hip_left = np.array(skeleton_coordinates[23])
-    #     hip_right = np.array(skeleton_coordinates[24])
-    #     hip_center = (hip_left + hip_right) / 2.0
-    #     x1, y1, z1 = hip_center
-    # else:
-    #     hip_center = None  # Hoặc xử lý fallback sau
-    # #print(f"hip_center: {hip_center}")
-    # if results.pose_world_landmarks:
-    #     for idx, landmark2 in enumerate(results.pose_world_landmarks.landmark):
-    #         if idx in required_landmarks:
-    #             x, y, z = landmark2.x, landmark2.y, landmark2.z
-    #             visibility = landmark2.visibility
-    #             if visibility > 0.6 and hip_center is not None:
-    #                 skeleton_coordinates2[idx] = (-x - x1, z + y1, -y + z1) 
-    #                 # print(f"Landmark {idx}: (x={x}, y={y}, z={z:.4f}, visibility={visibility})")
-
-    # # Hiển thị
 
 
 
