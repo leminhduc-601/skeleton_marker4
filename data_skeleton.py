@@ -9,13 +9,11 @@ from moveit_msgs.msg import CollisionObject
 from shape_msgs.msg import SolidPrimitive
 from tf.transformations import quaternion_about_axis
 from mediapipe.framework.formats import landmark_pb2
-
-# ====== SIMPLE ARM FILTERS: outlier + median + bone-length lock ======
 from collections import defaultdict, deque
-import numpy as np
+
 
 # ---- Tham số chỉnh được ----
-WINDOW = 5           # cửa sổ median (5 là hợp lý: mượt nhẹ, trễ ~2 frame)
+WINDOW = 2          # cửa sổ median (5 là hợp lý: mượt nhẹ, trễ ~2 frame)
 MAX_JUMP = 0.5       # bước nhảy tối đa chấp nhận giữa 2 frame (đơn vị VỊ TRÍ của bạn: m hoặc mm)
 CALIB_FRAMES = 50    # số frame để hiệu chuẩn độ dài xương tay
 # ----------------------------
@@ -130,8 +128,8 @@ def arm_filter_pipeline(skeleton_coordinates):
     """
     global _calibrated
 
-    if not isinstance(skeleton_coordinates, dict):
-        return skeleton_coordinates
+    # if not isinstance(skeleton_coordinates, dict):
+    #     return skeleton_coordinates
 
     # 1) Lọc theo joint: outlier → bỏ, median smoothing
     filtered = {}
@@ -266,18 +264,18 @@ def get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, regi
     # === Nhận diện khung xương bằng Mediapipe Pose ===
     results = pose.process(registered_image_bgr)
     skeleton_coordinates = {}
-    required_landmarks = [0, 11, 13, 15, 12, 14, 16, 23, 24, 25, 26, 27, 28]
+    required_landmarks = [0, 11, 13, 15, 12, 14, 16, 23, 24] # 25, 26, 27, 28]
 
     if results.pose_landmarks:
         filtered_landmarks = landmark_pb2.NormalizedLandmarkList()
         for idx, lm in enumerate(results.pose_landmarks.landmark):
-            if lm.visibility > 0.9 and idx in required_landmarks:
+            if lm.visibility > 0.6 and idx in required_landmarks:
                 x_px = int(lm.x * registered.width)
                 y_px = int(lm.y * registered.height)
                 point_3d = registration.getPointXYZ(undistorted, y_px, x_px)
                 x, y, z = point_3d
                 if not any(np.isnan([x, y, z])):
-                    skeleton_coordinates[idx] = (x, z, -y)
+                    skeleton_coordinates[idx] = (-x, z, -y)
                 filtered_landmarks.landmark.append(lm)
             else:
                 fake = landmark_pb2.NormalizedLandmark(x=-1.0, y=-1.0, z=0.0, visibility=0.0)
@@ -308,7 +306,7 @@ def get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, regi
     image_pub.publish(ros_image)
     
     listener.release(frames)
-    skeleton_coordinates = arm_filter_pipeline(skeleton_coordinates)
+    # skeleton_coordinates = arm_filter_pipeline(skeleton_coordinates)
     return skeleton_coordinates
 
 

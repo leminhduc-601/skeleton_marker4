@@ -13,7 +13,7 @@ from tf.transformations import quaternion_from_euler
 
 
 
-translation = (1.1, 0, 1.5)
+translation = (1.05, 0.1, 1.5)
 rotation_rpy = (-0.82, 0, 1.5708)
 
 def publish_static_transform(translation, rotation_rpy):
@@ -60,7 +60,6 @@ def main():
         while not rospy.is_shutdown():
             # 1. Lấy tọa độ skeleton
             skeleton_coordinates = get_skeleton_coordinates(listener, pose, mp_drawing, image_pub, bridge, registration)
-            print(skeleton_coordinates)
             #2. Hiển thị khung xương như là một vật cản trong môi trường rviz
             add_skeleton_collision_objects(skeleton_coordinates)
             rate.sleep()

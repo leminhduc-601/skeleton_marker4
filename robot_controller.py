@@ -306,7 +306,7 @@ def main():
 
     rospy.sleep(1.0)
 
-    add_real_obstacle_between(pose_A, pose_B)
+    # add_real_obstacle_between(pose_A, pose_B)
     rospy.sleep(1.0)
     # allow_collision_with_all_objects()
 

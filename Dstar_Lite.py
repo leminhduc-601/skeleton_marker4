@@ -1,6 +1,6 @@
 import numpy as np
 #Khởi tạo kích thước của 1 ô voxel
-VOXEL_SIZE = 0.05 # 5cm
+VOXEL_SIZE = 0.07 # 5cm
 
 X_RANGE = (-0.5, 0.5)
 Y_RANGE = (-0.5, 0.5)
