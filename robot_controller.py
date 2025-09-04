@@ -135,13 +135,17 @@ def move_between_voxels(move_group, path):
     if not waypoints:
         rospy.logwarn("✘ Không có waypoint nào để thực hiện.")
         return None, None, 0
+    import time
 
+    start = time.time()
     # 3. Tính toán quỹ đạo
     plan, fraction = move_group.compute_cartesian_path(
         waypoints,
         eef_step=0.05,
         avoid_collisions=True
     )
+    end = time.time()
+    print("Thời gian chạy:", (end - start) * 1000, "ms")
 
     # 4. Thực thi plan bất kể fraction
     move_group.execute(plan, wait=True)
